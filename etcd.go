@@ -2,12 +2,12 @@ package ipam
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"log"
 	"sync"
 	"time"
 
+	"go.etcd.io/etcd/client/pkg/v3/transport"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -18,35 +18,36 @@ type etcd struct {
 }
 
 // NewEtcd create a etcd storage for ipam
-func NewEtcd(ip, port string, cert, key []byte, insecureskip bool, keyPrefix string) Storage {
-	return newEtcd(ip, port, cert, key, insecureskip, keyPrefix)
+func NewEtcd(ip, port, cert, key, ca string, insecureskip bool, keyPrefix string) Storage {
+	return newEtcd(ip, port, cert, key, ca, insecureskip, keyPrefix)
 }
 
 func (e *etcd) Name() string {
 	return "etcd"
 }
 
-func newEtcd(ip, port string, cert, key []byte, insecureskip bool, keyPrefix string) *etcd {
+func newEtcd(ip, port, cert, key, ca string, insecureskip bool, keyPrefix string) *etcd {
+	tlsInfo := transport.TLSInfo{
+		CertFile:           cert,
+		KeyFile:            key,
+		TrustedCAFile:      ca,
+		// nolint:gosec
+		// #nosec G402
+		InsecureSkipVerify: insecureskip,
+	}
+
+	tlsConfig, err := tlsInfo.ClientConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	etcdConfig := clientv3.Config{
 		Endpoints:   []string{fmt.Sprintf("%s:%s", ip, port)},
 		DialTimeout: 5 * time.Second,
 		Context:     context.Background(),
+                TLS:         tlsConfig,
 	}
 
-	if cert != nil && key != nil {
-		// SSL
-		clientCert, err := tls.X509KeyPair(cert, key)
-		if err != nil {
-			log.Fatal(err)
-		}
-		tls := &tls.Config{
-			Certificates: []tls.Certificate{clientCert},
-			// nolint:gosec
-			// #nosec G402
-			InsecureSkipVerify: insecureskip,
-		}
-		etcdConfig.TLS = tls
-	}
 	cli, err := clientv3.New(etcdConfig)
 	if err != nil {
 		log.Fatal(err)
